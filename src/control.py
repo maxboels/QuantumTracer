@@ -102,7 +102,7 @@ class BasicController:
         angle = (0.5 + np.clip(norm * self.steer_scale, -self.steer_scale, self.steer_scale)) * 2 - 1
 
         # throttle control
-        raw = self.Kp_dist * (z - self.desired_dist)
+        raw = self.Kp_dist * (z)
         print(f"Kp_dist: {self.Kp_dist}, z: {z}m, desired: {self.desired_dist}m => raw throttle {raw}")
         throttle = float(np.clip(raw, 0.0, 1.0))
 

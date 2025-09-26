@@ -22,7 +22,7 @@ def process_frame(request):
     frame = request.make_array("main")
 
     detector = BasicDetector()
-    ctrl = BasicController(detector, params={}, img_size=FRAME_WIDTH)
+    ctrl = BasicController(detector, params={"lookup_csv": "src/px_to_m.csv"}, img_size=FRAME_WIDTH)
 
     # Detect object location and size
     coords, diameter, _ = detector.analyse_img(frame)
