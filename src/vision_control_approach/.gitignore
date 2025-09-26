@@ -5,4 +5,4 @@ data/
 venv/
 quantvenv/
 myvenv/
-src/vision_control_approach/vc_venv/
+vc_venv/
