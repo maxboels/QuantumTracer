@@ -267,26 +267,6 @@ python scripts/optimize_model.py \
     --output ./deploy/tracer_optimized.onnx
 ```
 
-## 🚨 Safety & Limitations
-
-### Safety Features
-- ✅ Emergency stop via GPIO pin
-- ✅ Steering/throttle limits in configuration
-- ✅ Automatic timeout and failsafe modes
-- ✅ Real-time monitoring and logging
-
-### Current Limitations
-- 🔄 Single camera (no stereo depth)
-- 🔄 Limited to structured environments
-- 🔄 Requires good lighting conditions
-- 🔄 No dynamic obstacle avoidance
-
-### Future Enhancements
-- 🎯 Multi-camera setup for better perception
-- 🎯 LiDAR integration for obstacle detection
-- 🎯 Online learning and adaptation
-- 🎯 Fleet coordination capabilities
-
 ## 📚 Documentation
 
 - **[Integration Guide](docs/rc_car_integration_guide.md)**: Detailed technical integration
