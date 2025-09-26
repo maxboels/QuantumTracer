@@ -1,0 +1,3 @@
+[submodule "src/imitation_learning/lerobot"]
+	path = src/imitation_learning/lerobot
+	url = https://github.com/huggingface/lerobot.git
