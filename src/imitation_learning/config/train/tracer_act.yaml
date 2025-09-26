@@ -1,0 +1,42 @@
+# Training configuration for Tracer RC car with ACT
+_target_: lerobot.configs.train.TrainPipelineConfig
+
+# Dataset configuration
+dataset:
+  repo_id: "tracer_navigation_demos"
+  local_dir: "./data/tracer_demos"
+
+# Environment (for evaluation)
+env:
+  _target_: lerobot.envs.real_env.RealEnv
+  robot: ${robot}
+
+# Policy
+policy: ${policy}
+
+# Training settings
+output_dir: "./outputs/tracer_act"
+job_name: "tracer_act_${now:%Y%m%d_%H%M%S}"
+seed: 1337
+num_workers: 4
+batch_size: 8
+steps: 50000
+eval_freq: 10000
+log_freq: 100
+save_checkpoint: true
+save_freq: 10000
+
+# Optimization
+use_policy_training_preset: true
+
+# Evaluation
+eval:
+  n_episodes: 5
+  max_episodes_rendered: 1
+
+# Logging
+wandb:
+  enable: true
+  project: "tracer_navigation"
+  entity: null
+  notes: "ACT training for Tracer RC car navigation"

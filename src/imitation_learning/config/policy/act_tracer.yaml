@@ -1,0 +1,51 @@
+# ACT Policy configuration for Tracer RC car
+_target_: lerobot.policies.act.ACTConfig
+
+# Observation settings
+n_obs_steps: 1
+
+# Input features (cameras + state)
+input_features:
+  observation.image_front:
+    dtype: float32
+    shape: [480, 640, 3]  # H, W, C
+    normalize: true
+  observation.state:
+    dtype: float32
+    shape: [2]  # [steering, throttle]
+    normalize: true
+
+# Output features (actions)
+output_features:
+  action:
+    dtype: float32
+    shape: [2]  # [steering_command, throttle_command]
+    normalize: true
+
+# ACT model parameters
+chunk_size: 32
+n_action_steps: 32
+hidden_size: 512
+n_encoder_layers: 4
+n_decoder_layers: 7
+n_heads: 8
+feedforward_dim: 3200
+dropout: 0.1
+kl_weight: 10.0
+temporal_ensemble_coeff: 0.01
+
+# Vision encoder
+vision_encoder: "resnet18"
+pretrained_backbone: true
+replace_final_stride_with_dilation: false
+n_cameras: 1
+
+# Device and precision
+device: cuda
+use_amp: true
+
+# Normalization configuration
+normalization_mapping:
+  observation.image_front: "mean_std"
+  observation.state: "min_max"
+  action: "min_max"

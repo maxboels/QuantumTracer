@@ -1,0 +1,37 @@
+# Environment configuration for Tracer RC car
+_target_: lerobot.envs.real_env.RealEnv
+
+# Robot configuration
+robot:
+  _target_: lerobot.robots.tracer.Tracer
+  id: tracer_main
+  robot_type: tracer
+  
+  # Servo pins and ranges
+  steering_pin: 18
+  throttle_pin: 19
+  steering_range: [1000, 2000]
+  throttle_range: [1000, 2000]
+  
+  # Safety settings
+  max_steering_angle: 45.0
+  max_throttle: 0.5
+  enable_emergency_stop: true
+  emergency_stop_pin: 21
+  
+  # Camera configuration
+  cameras:
+    front:
+      _target_: lerobot.cameras.opencv.OpenCVCamera
+      device_id: "/dev/video0"
+      fps: 30
+      width: 640
+      height: 480
+      color_mode: "rgb"
+  
+  control_frequency: 30.0
+  episode_time_s: 60.0
+
+# Environment settings
+max_episode_steps: 1800  # 60 seconds at 30 Hz
+fps: 30

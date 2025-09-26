@@ -1,0 +1,11 @@
+# Additional requirements for Tracer RC car integration
+# These are in addition to LeRobot's requirements
+
+# GPIO control for Raspberry Pi
+RPi.GPIO>=0.7.0
+
+# Additional camera support 
+opencv-python>=4.8.0
+
+# For development/testing without GPIO hardware
+# (automatically handled in code with graceful fallback)
