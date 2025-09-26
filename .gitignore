@@ -1,0 +1,7 @@
+# Data folder
+data/
+
+# Virtual environment
+venv/
+quantvenv/
+myvenv/
