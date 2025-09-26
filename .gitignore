@@ -1,8 +1,27 @@
-# Data folder
-data/
+﻿# Python / project
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Virtual environment
+# virtual env
+.venv/
 venv/
-quantvenv/
-myvenv/
-src/vision_control_approach/vc_venv/
+env/
+
+# logs and outputs
+logs/
+*.log
+logs/**
+
+# IDE
+.vscode/
+.idea/
+
+# local calibration / secrets
+params.json
+lookup_px_to_m.csv
+
+# OS
+Thumbs.db
+.DS_Store
