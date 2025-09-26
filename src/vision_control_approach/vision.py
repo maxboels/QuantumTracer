@@ -1,71 +1,69 @@
+﻿# src/vision_control_approach/vision.py
 import numpy as np
-from typing import Tuple
-from scipy.ndimage import binary_erosion
+import cv2
 
 class Input:
-
     def __init__(self):
-
-        # horizon length of past snapshots
         self.H = 10
+        self.img = np.zeros([256,256,3], dtype=np.uint8)
+        self.output_history = np.zeros([self.H,2], dtype=float)
 
-        # RGB, width height
-        self.img = np.zeros([256,256,3])
-        # snapshoots, dim (acceleration, steering)
-        self.output_history = np.zeros([self.H,2])
-    
-    def set_img(self, img, ):
-        # Transpose to (256, 256, 3) for easier pixel-wise comparison
-        # img = np.transpose(img, (1, 2, 0)) if needed transpose array into correct form
+    def set_img(self, img):
+        # accept either (H,W,3) RGB uint8
+        if img is None:
+            return
+        if img.ndim == 3 and img.shape[0] == 3:
+            img = np.transpose(img, (1,2,0))
+        if img.shape[0] != 256 or img.shape[1] != 256:
+            img = cv2.resize(img, (256,256))
         self.img = img
 
-    def set_input(self, output): 
-        # add the new recording:
-        self.output_history = np.vstack([self.output_history, output.reshape(1, 2)])
-        # drop the oldest recording:
-        self.ouput_history = self.ouput_history[1:]
-
+    def set_input(self, output):
+        self.output_history = np.roll(self.output_history, -1, axis=0)
+        self.output_history[-1,:] = np.array(output).reshape(2,)
 
 class BasicDetector:
-
     def __init__(self,
-                 red_min: Tuple[int] = (200, 0, 0),
-                 red_max: Tuple[int] = (255, 80, 80),
-                 erosion_kernel_size: int = 3,
-                 enable_noise_reduction: bool = True):
-        # RGB intervals for saturated red
-        self.red_min = np.array(red_min)
-        self.red_max = np.array(red_max)
-        
-        # Morphological operations parameters
-        self.erosion_kernel_size = erosion_kernel_size
-        self.enable_noise_reduction = enable_noise_reduction
-        # Create the structuring element (kernel) for erosion
-        self.erosion_structure = np.ones((erosion_kernel_size, erosion_kernel_size))
+                 hsv_lower1=(0,120,70),
+                 hsv_upper1=(10,255,255),
+                 hsv_lower2=(170,120,70),
+                 hsv_upper2=(180,255,255),
+                 morph_kernel_size=5,
+                 min_area_px=20):
+        self.hsv_lower1 = np.array(hsv_lower1, dtype=np.uint8)
+        self.hsv_upper1 = np.array(hsv_upper1, dtype=np.uint8)
+        self.hsv_lower2 = np.array(hsv_lower2, dtype=np.uint8)
+        self.hsv_upper2 = np.array(hsv_upper2, dtype=np.uint8)
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel_size, morph_kernel_size))
+        self.min_area_px = min_area_px
 
     def analyse_img(self, img):
-        # img shape: (256, 256, 3)
-        # Create mask for saturated red pixels
-        mask = np.all((img >= self.red_min) & (img <= self.red_max), axis=-1)
-        # Find indices of True values
-        true_indices = np.argwhere(mask)
-        if true_indices.size == 0:
-            return None, None, mask  # No cluster found
-        # Cluster analysis: bounding box
-
-        # Remove isolated pixels (noise) by checking neighbors
-        # mask is shape (256, 256), True for red pixels
-        if self.enable_noise_reduction:
-            # Erode mask to remove pixels without connected neighbors
-            cleaned_mask = binary_erosion(mask, structure=self.erosion_structure, border_value=0)
-        else:
-            # Skip noise reduction if disabled
-            cleaned_mask = mask
-
-        # Only keep pixels that are part of a cluster (not isolated)
-        true_indices = np.argwhere(cleaned_mask)
-        y_min, x_min = true_indices.min(axis=0)
-        y_max, x_max = true_indices.max(axis=0)
-        center = ((y_min + y_max) // 2, (x_min + x_max) // 2)
-        dimension = (y_max - y_min + 1, x_max - x_min + 1)
-        return center, dimension, mask
+        """
+        Input: img HxWx3 RGB uint8
+        Returns: center (y,x) or None, dimension (diameter_px,diameter_px) or None, mask (H,W)
+        """
+        if img is None:
+            return None, None, None
+        # ensure uint8 RGB
+        img_u8 = img.astype(np.uint8)
+        hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
+        mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
+        mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
+        mask = cv2.bitwise_or(mask1, mask2)
+        # clean
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
+        # contours
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return None, None, mask
+        # pick largest contour
+        c = max(cnts, key=cv2.contourArea)
+        area = cv2.contourArea(c)
+        if area < self.min_area_px:
+            return None, None, mask
+        (x,y), radius = cv2.minEnclosingCircle(c)
+        diameter = 2.0 * float(radius)
+        # convert to integer center in (row,col) format to match control code (y,x)
+        center = (int(round(y)), int(round(x)))
+        dim = (int(round(diameter)), int(round(diameter)))
+        return center, dim, mask
