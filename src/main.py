@@ -1,14 +1,14 @@
 from picamera2 import Picamera2
 import os
 from datetime import datetime
-from src.position_estimation import PositionEstimator
+from position_estimation import PositionEstimator
 from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
 import time
 
 _last_proc_time = 0.0
-_min_proc_dt = 0.0
+_min_proc_dt = 0.02
 
 
 output_dir = "saved_frames"
@@ -38,7 +38,12 @@ def process_frame(request):
             return
         _last_proc_time = now
 
-    frame_rgb = request.make_array("main")  # HxWx3 RGB uint8
+    print("Processing frame...")
+    frame = request.make_array("main")  # HxWx3 RGB uint8
+
+    # for some fucking reason the only way we could get colors right was to
+    # capture BGR and then convert to RGB by reversing channels ¯\_(ツ)_/¯
+    frame_rgb = frame[:,:,::-1]
 
     # Detect object location and size (center (x_px,y_px) floats, diameter float px)
     coords, diameter, mask = detector.analyse_img(frame_rgb)
@@ -49,14 +54,15 @@ def process_frame(request):
             streamer.update(debug_bgr)
 
     if coords is None or diameter is None:
+        print("No object detected.")
         return
 
     # Estimate distance and angle to object
     distance_angle = estimator.estimate(coords, diameter)
     if distance_angle is None:
+        print("Could not estimate position.")
         return
     distance, angle = distance_angle
-
     
 
     throttle_angle = ctrl.get_command(distance, angle)
@@ -75,6 +81,15 @@ def process_frame(request):
         actuator.stop()
         return
 
+def process_frame_wrapper(request):    
+    try:
+        process_frame(request)
+    except Exception as e:
+        try:
+            request.release()
+        except Exception:
+            pass
+
 
 def main():
     global start_timestamp, streamer
@@ -86,18 +101,19 @@ def main():
         print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/")
 
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}))
-    picam2.post_callback = process_frame
+    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "BGR888"}))
+    picam2.post_callback = process_frame_wrapper
 
     # Lock camera controls for stable geometry (daytime indoors/outdoors)
     try:
         controls = {
-            "ExposureTime": 8000,    # µs, ~1/125s
-            "AnalogueGain": 1.2,
-            "AwbEnable": False,
-            "ColourGains": (1.2, 1.0)
+            "ExposureTime": 16000,    # µs
+            "AnalogueGain": 4,
+            "AwbEnable": True,
+            # "ColourGains": (1.2, 1.0)
         }
         picam2.set_controls(controls)
+        print("Camera controls set:", controls)
     except Exception as e:
         print("Warning: could not set Picamera2 controls:", e)
 

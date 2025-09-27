@@ -2,6 +2,10 @@
 import numpy as np
 
 class BasicController:
+    def __init__(self, params: dict = {}):
+        self.params = params
+        self.Kp_dist = float(self.params.get("Kp_dist", 0.7))
+
 
     def get_command(self, distance, angle):
         """

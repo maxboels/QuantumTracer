@@ -40,11 +40,14 @@ class BasicDetector:
 
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not cnts:
+            print("No contours found.")
+            cv2.imwrite("frame.jpg", img_rgb)
             return None, None, mask
 
         c = max(cnts, key=cv2.contourArea)
         area = cv2.contourArea(c)
         if area < self.min_area_px:
+            print("Detected area is too small.")
             return None, None, mask
 
         # Prefer sub-pixel ellipse fit. Fallback to minEnclosingCircle.

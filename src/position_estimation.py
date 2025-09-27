@@ -70,7 +70,6 @@ class PositionEstimator:
                 self.lookup = None
         # parameters
         self.steer_scale = float(self.params.get("steer_scale", 0.45))
-        self.Kp_dist = float(self.params.get("Kp_dist", 0.7))
         self.desired_dist = float(self.params.get("desired_dist_m", 0.6))
         self.collision_threshold = float(self.params.get("collision_threshold_m", 0.45))
         self.lunge_power = float(self.params.get("lunge_power_pct", 0.85))
