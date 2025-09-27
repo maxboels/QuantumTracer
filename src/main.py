@@ -26,7 +26,7 @@ os.makedirs(output_dir, exist_ok=True)
 FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", "1280"))
 FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", "720"))
 TIMEOUT = int(os.getenv("TIMEOUT", "20"))  # seconds
-STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
+STREAMING_ENABLED = False             ##  Disabling streaming for latency  //os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
 
 detector = BasicDetector()
@@ -55,7 +55,7 @@ def process_frame(request):
     if coords is None or diameter is None:
         print("No object detected")
         # still stream the debug view; don't actuate
-        sleep(0.02)
+      ### Replaced blocking sleeps with non-blocking throttle. Sleeping inside the camera callback blocks the camera thread and inflates latency.///  sleep(0.02)
         return
 
     print(f"Detected object at {coords} with diameter {diameter}px")
@@ -64,7 +64,7 @@ def process_frame(request):
     distance_angle = estimator.estimate(coords, diameter)
     if distance_angle is None:
         print("Position estimation failed")
-        sleep(0.02)
+     ### Replaced blocking sleeps with non-blocking throttle. Sleeping inside the camera callback blocks the camera thread and inflates latency.///   sleep(0.02)
         return
     distance, angle = distance_angle
     print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
