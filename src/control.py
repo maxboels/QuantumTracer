@@ -3,6 +3,16 @@ import numpy as np
 
 class BasicController:
 
+    def __init__(self, Kp_dist):
+        self.Kp_dist = Kp_dist
+
+    def default_movement(DEFAULT_ANGLE):
+
+        angle = DEFAULT_ANGLE
+        throttle = 0.3
+
+        return throttle, angle
+
     def get_command(self, distance, angle):
         """
         The angle is expected to be in range [-1,1] where 0 is straight ahead,

@@ -7,6 +7,7 @@ from control import BasicController
 from actuator_controls import ActuatorControls
 from time import sleep
 from datetime import datetime
+import numpy as np
 
 
 output_dir = "saved_frames"  # Directory to save frames
@@ -17,10 +18,13 @@ FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", "720"))
 TIMEOUT = int(os.getenv("TIMEOUT", "20"))  # seconds
 STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
+DEFAULT_ANGLE = -1
+SLEEP_LENGTH = 0.02
+Kp = 0.5
 
 detector = BasicDetector()
 estimator = PositionEstimator(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
-ctrl = BasicController()
+ctrl = BasicController(Kp)
 actuator = ActuatorControls()
 
 streamer = None
@@ -44,7 +48,7 @@ def process_frame(request):
     if coords is None or diameter is None:
         print("No object detected")
         # still stream the debug view; don't actuate
-        sleep(0.02)
+        sleep(SLEEP_LENGTH)
         return
 
     print(f"Detected object at {coords} with diameter {diameter}px")
@@ -52,8 +56,15 @@ def process_frame(request):
     # Estimate distance and angle to object
     distance_angle = estimator.estimate(coords, diameter)
     if distance_angle is None:
-        print("Position estimation failed")
-        sleep(0.02)
+        # print("Position estimation failed")
+        # sleep(0.02)
+        if np.random.rand() > 1 - SLEEP_LENGTH * 5:
+            DEFAULT_ANGLE *= -1
+        print("Default movement done, since no ballon detected.")
+        throttle, angle = ctrl.default_movement()
+        actuator.set_fwd_speed(throttle)
+        actuator.set_steering_angle(angle)
+        sleep(SLEEP_LENGTH)
         return
     distance, angle = distance_angle
     print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
@@ -77,7 +88,7 @@ def process_frame(request):
         actuator.stop()
         return
     
-    sleep(0.01)
+    sleep(SLEEP_LENGTH)
 
 
 def main():
@@ -97,7 +108,7 @@ def main():
     # Keep the script alive
     try:
         while True:
-            sleep(0.1)
+            sleep(SLEEP_LENGTH)
     except KeyboardInterrupt:
         picam2.stop()
     finally:
