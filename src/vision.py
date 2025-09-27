@@ -6,6 +6,34 @@ import socketserver
 import time
 import queue
 
+# --- Globals for smoothing and frame timing ---
+_smooth_alpha = 0.6
+_outlier_fraction = 0.5
+_last_proc_time = 0.0
+_min_proc_dt = 0.0
+
+def compute_distance_uncertainty(S_m, f_px, p_px,
+                                 sigma_S_frac=0.02, sigma_f_frac=0.03, sigma_p_px=0.7):
+    rel_S = sigma_S_frac
+    rel_f = sigma_f_frac
+    rel_p = sigma_p_px / max(1.0, p_px)
+    return math.sqrt(rel_S*rel_S + rel_f*rel_f + rel_p*rel_p)
+
+_prev_distance = None
+_prev_angle = None
+
+def smooth_and_reject(d, a, alpha=_smooth_alpha, outlier_frac=_outlier_fraction):
+    global _prev_distance, _prev_angle
+    if _prev_distance is None:
+        _prev_distance, _prev_angle = d, a
+        return d, a, False
+    if abs(d - _prev_distance) > outlier_frac * max(1e-6, _prev_distance):
+        return _prev_distance, _prev_angle, True
+    d_s = alpha * d + (1.0 - alpha) * _prev_distance
+    a_s = alpha * a + (1.0 - alpha) * _prev_angle
+    _prev_distance, _prev_angle = d_s, a_s
+    return d_s, a_s, False
+    
 class BasicDetector:
     def __init__(self,
                  hsv_lower1=(0,120,70),
