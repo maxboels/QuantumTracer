@@ -1,7 +1,7 @@
 import RPi.GPIO as GPIO
 import os
 
-SPEED_DAMPING_FACTOR = os.getenv("SPEED_DAMPING_FACTOR", 0.5)
+SPEED_DAMPING_FACTOR = os.getenv("SPEED_DAMPING_FACTOR", 0.4)
 
 assert SPEED_DAMPING_FACTOR > 0 and SPEED_DAMPING_FACTOR <= 1, "SPEED_DAMPING_FACTOR must be between 0 and 1"
 
@@ -29,14 +29,17 @@ class ActuatorControls:
             print(f"Speed must be between 0 and 1. Ignoring command {speed}")
             return
         
-        fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
+        # LOW SPEED OVERRIDE
+        fwd_bck_pwm.ChangeDutyCycle(0 if speed < 0.1 else 10)
+        
+        # fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
 
     def set_steering_angle(self, angle):
         if angle < -1 or angle > 1:
             print(f"Angle must be between -1 and 1. Ignoring command {angle}")
             return
         
-        duty_cycle = 7 + angle * 2  # Map -1 to 1 -> 5% to 9%
+        duty_cycle = 7.7 + angle * 2  # Map -1 to 1 -> 5% to 9%
         print(f"Setting steering angle to {angle} (duty cycle {duty_cycle}%)")
         left_right_pwm.ChangeDutyCycle(duty_cycle)
 

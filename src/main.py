@@ -5,6 +5,8 @@ from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
 from time import sleep
+from datetime import datetime
+
 
 output_dir = "saved_frames"  # Directory to save frames
 os.makedirs(output_dir, exist_ok=True)
@@ -12,26 +14,30 @@ os.makedirs(output_dir, exist_ok=True)
 FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", "1280"))
 FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", "720"))
 TIMEOUT = int(os.getenv("TIMEOUT", "20"))  # seconds
+STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
 
-# Instantiate once (avoid per-frame churn)
 detector = BasicDetector()
 ctrl = BasicController(detector, params={"lookup_csv": "src/px_to_m.csv"}, img_size=FRAME_WIDTH)
 actuator = ActuatorControls()
-streamer = MJPEGStreamer(port=STREAM_PORT)  # visit http://<pi-ip>:8081/
+
+streamer = None
+if STREAMING_ENABLED:
+    streamer = MJPEGStreamer(port=STREAM_PORT)  # visit http://<pi-ip>:8081/
 
 start_timestamp = None
 
 def process_frame(request):
-    global start_timestamp
     frame_rgb = request.make_array("main")  # HxWx3 RGB uint8
 
     # Detect object location and size
     coords, diameter, mask = detector.analyse_img(frame_rgb)
 
-    # Compose a single debug frame: original | mask | overlay
-    debug_bgr = detector.make_debug_view(frame_rgb, mask, coords, diameter)
-    streamer.update(debug_bgr)  # publish to MJPEG stream
+
+    if STREAMING_ENABLED:
+        # Compose a single debug frame: original | mask | overlay
+        debug_bgr = detector.make_debug_view(frame_rgb, mask, coords, diameter)
+        streamer.update(debug_bgr)  # publish to MJPEG stream
 
     if coords is None or diameter is None:
         print("No object detected")
@@ -59,7 +65,7 @@ def process_frame(request):
         actuator.stop()
         return
     
-    sleep(0.02)  # lighter touch for responsiveness
+    sleep(0.01)
 
 
 def main():

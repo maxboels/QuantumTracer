@@ -56,18 +56,21 @@ class BasicController:
             return None
         # if lookup available and diam in range, prefer interpolation
         if self.lookup is not None:
+            print("Using lookup table for distance estimation")
             pxs, ds = self.lookup
             # if diam within table range
-            if diam_px >= pxs.min() and diam_px <= pxs.max():
-                return float(np.interp(diam_px, pxs, ds))
-        # if calibration constant k available use direct k/px
-        if self.k:
-            z = (self.k / float(diam_px))
-            return float(np.clip(z, self.min_dist_m, self.max_dist_m))
-        # fallback to pinhole: z = (W * f) / px
-        if self.target_w > 0 and self.f_px > 0:
-            z = (self.target_w * self.f_px) / float(diam_px)
-            return float(np.clip(z, self.min_dist_m, self.max_dist_m))
+            if diam_px < pxs.min():
+                diam_px = pxs.min()
+            elif diam_px > pxs.max():
+                diam_px = pxs.max()
+
+            print(f"Interpolating distance for diameter {diam_px}px")
+
+            # if diam_px >= pxs.min() and diam_px <= pxs.max():
+            return float(np.interp(diam_px, pxs, ds))
+        
+    
+        print("Lookup table not available or diam out of range, using fallback method")
         return None
 
     def get_command(self, coords, diam):
