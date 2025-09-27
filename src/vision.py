@@ -21,27 +21,44 @@ class BasicDetector:
         self.min_area_px = min_area_px
 
     def analyse_img(self, img_rgb):
-        if img_rgb is None:
-            return None, None, None
-        img_u8 = img_rgb.astype(np.uint8)
-        hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
-        mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
-        mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
-        mask = cv2.bitwise_or(mask1, mask2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
+    """
+    Returns:
+      center: (x_px, y_px) as floats (None if no detection)
+      diameter: float in pixels (None if no detection)
+      mask: binary mask (numpy array)
+    """
+    if img_rgb is None:
+        return None, None, None
 
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not cnts:
-            return None, None, mask
-        c = max(cnts, key=cv2.contourArea)
-        area = cv2.contourArea(c)
-        if area < self.min_area_px:
-            return None, None, mask
+    img_u8 = img_rgb.astype(np.uint8)
+    hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
+    mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
+    mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
+    mask = cv2.bitwise_or(mask1, mask2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
+
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None, None, mask
+
+    c = max(cnts, key=cv2.contourArea)
+    area = cv2.contourArea(c)
+    if area < self.min_area_px:
+        return None, None, mask
+
+    # Prefer ellipse fit (sub-pixel floats). Fallback to minEnclosingCircle.
+    if len(c) >= 5:
+        ellipse = cv2.fitEllipse(c)            # ((x,y),(w,h),angle)
+        (x, y), (w, h), ang = ellipse
+        diameter = float((w + h) / 2.0)       # fractional px
+        center = (float(x), float(y))         # (x_px, y_px)
+    else:
         (x, y), radius = cv2.minEnclosingCircle(c)
-        diameter = 2.0 * float(radius)
-        center = (int(round(y)), int(round(x)))  # (row, col)
-        diam = int(round(diameter))
-        return center, diam, mask
+        diameter = float(2.0 * radius)
+        center = (float(x), float(y))
+
+    return center, diameter, mask
+
 
     def make_debug_view(self, img_rgb, mask, center, diam,
                         label_font=cv2.FONT_HERSHEY_SIMPLEX):
@@ -64,21 +81,21 @@ class BasicDetector:
         # Panel 3: Overlay with circle + green midpoint dot
         overlay = orig_bgr.copy()
         if center is not None and diam is not None and diam > 0:
-            y, x = int(center[0]), int(center[1])
-            radius = int(max(1, diam // 2))
-            # Circle outline (green)
-            cv2.circle(overlay, (x, y), radius, (0, 255, 0), 2)
-            # Midpoint dot (green)
-            cv2.circle(overlay, (x, y), 6, (0, 255, 0), -1)
-            # Label
-            cv2.putText(overlay, f"(x={x}, y={y}), d={diam}px",
+            # center is (x_px, y_px)
+            x_draw = int(round(center[0]))
+            y_draw = int(round(center[1]))
+            radius = int(max(1, round(diam / 2.0)))
+            cv2.circle(overlay, (x_draw, y_draw), radius, (0, 255, 0), 2)
+            cv2.circle(overlay, (x_draw, y_draw), 6, (0, 255, 0), -1)
+            cv2.putText(overlay, f"(x={center[0]:.1f}, y={center[1]:.1f}), d={diam:.2f}px",
                         (10, 60), label_font, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
         else:
             cv2.putText(overlay, "No detection", (10, 60),
                         label_font, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
-        cv2.putText(overlay, "Circle + midpoint", (10, 30),
-                    label_font, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
+            cv2.putText(overlay, "Circle + midpoint", (10, 30),
+                        label_font, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
         # Stack panels
         h = orig_bgr.shape[0]
