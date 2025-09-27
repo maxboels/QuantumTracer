@@ -7,6 +7,17 @@ from control import BasicController
 from actuator_controls import ActuatorControls
 from time import sleep
 from datetime import datetime
+import time
+import math
+import queue
+
+# --- Globals for smoothing and frame timing ---
+
+_smooth_alpha = 0.6          # how much to smooth noisy distance/angle values (0=no smoothing, 1=no smoothing, higher = follow changes faster)
+_outlier_fraction = 0.5      # if a new measurement jumps more than 50% from the previous, ignore it as a likely bad frame
+_last_proc_time = 0.0        # remembers the time we last processed a frame, used to control how often we run heavy code
+_min_proc_dt = 0.0           # minimum time (seconds) between frame processing; 0.04 = ~25Hz cap, 0.0 = process every frame
+
 
 
 output_dir = "saved_frames"  # Directory to save frames
