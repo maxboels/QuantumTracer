@@ -58,20 +58,7 @@ def process_frame(request):
         return
     distance, angle = distance_angle
 
-    # Uncertainty (use estimator.f_px if available)
-    S_m = 0.125  # balloon diameter in meters (fallback)
-    f_px = getattr(estimator, "f_px", None)
-    if f_px is None:
-        f_px = 4.74 * FRAME_WIDTH / 6.45
-    rel_unc = compute_distance_uncertainty(S_m, f_px, diameter)
-    abs_unc = rel_unc * distance
-    print(f"Detected center={coords}, diam={diameter:.2f}px -> dist={distance:.2f}m ±{abs_unc:.2f}m ({rel_unc*100:.1f}%) angle={angle:.2f}°")
-
-    # Smooth and reject outliers. Use smoothed values for control.
-    dist_s, ang_s, rejected = smooth_and_reject(distance, angle)
-    if rejected:
-        print("Outlier detected. Skipping actuation.")
-        return
+    
 
     throttle_angle = ctrl.get_command(dist_s, ang_s)
     if throttle_angle is None:
