@@ -8,7 +8,7 @@ from actuator_controls import ActuatorControls
 import time
 
 _last_proc_time = 0.0
-_min_proc_dt = 0.02
+_min_proc_dt = 0.1
 
 
 output_dir = "saved_frames"
