@@ -1,7 +1,7 @@
 from picamera2 import Picamera2
 import os
 from datetime import datetime
-from src.position_estimation import PositionEstimator
+from position_estimation import PositionEstimator
 from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
@@ -86,7 +86,8 @@ def main():
     start_timestamp = datetime.now().timestamp()
 
     # Start streamer
-    streamer.start()
+    if STREAMING_ENABLED:
+        streamer.start()
     print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/ (open from your laptop via the Pi's IP)")
 
     picam2 = Picamera2()
