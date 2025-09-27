@@ -3,13 +3,15 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 import time
 
-class Vehicle:
+class BaseVehicle:
+    """Base class for vehicle dynamics"""
     def __init__(self, states_docu, control_docu=None, wheelbase=2.5):
         self.L = wheelbase
         self.states_docu = states_docu
         self.control_docu = control_docu
     
     def dynamics(self, state, control):
+        """Common vehicle dynamics model"""
         x, y, phi, v = state
         a, delta = control
         
@@ -18,76 +20,158 @@ class Vehicle:
         phi_dot = (v / self.L) * np.tan(delta)
         v_dot = a
         
-        return np.array([x_dot, y_dot, phi_dot, v_dot])
+        return [x_dot, y_dot, phi_dot, v_dot]
     
     def get_state_names(self):
         return self.states_docu
     
     def get_control_names(self):
         return self.control_docu
+
+class HuntedVehicle(BaseVehicle):
+    """Vehicle that is being hunted - simple time-based control"""
+    def __init__(self, states_docu, wheelbase=2.5):
+        super().__init__(states_docu, ["acceleration", "steer_angle"], wheelbase)
+        self._setup_control()
     
-    def set_hunted_control(self):
-        # Constant steering for circular motion
-        def control(t):
-            # return [0.0, 0.2]  # no acceleration, constant steering
-            angl = t*0.05
-            acce = 0.0 #np.sin(t)
-            return [acce,angl]
-        self.control_docu = ["acceleration", "steer_angle"]
+    def _setup_control(self):
+        """Setup simple time-based control for circular motion"""
+        def control(t, state):
+            angl = t * 0.05  # Gradually increasing steering angle
+            acce = 0.0       # No acceleration
+            return [acce, angl]
+        
+        self.control = control
+
+class HunterVehicle(BaseVehicle):
+    """Vehicle that hunts the target - state-feedback control"""
+    def __init__(self, states_docu, wheelbase=2.5):
+        super().__init__(states_docu, ["acceleration", "steer_angle"], wheelbase)
+        self._setup_control()
+    
+    def _setup_control(self):
+        """Setup hunting control that tracks the target"""
+        def control(t, state, target_state):
+            # Measure angle to target
+            angle_to_target = self.measure(state, target_state)
+            
+            # Estimate steering command
+            angle = self.estimate(angle_to_target)
+            angle_steer = 0.3 * angle
+            acceleration = 0.0  # Constant speed hunting
+            
+            return [acceleration, angle_steer]
+        
         self.control = control
     
-class Simulator:
-    def __init__(self, vehicle):
-        self.vehicle = vehicle
+    def measure(self, state_own, state_target):
+        """Measure relative angle to target vehicle"""
+        x1, y1, phi1, v1 = state_target  # Target position
+        x2, y2, phi2, v2 = state_own     # Own position and heading
+        
+        # Compute relative position vector
+        distance_x = x1 - x2
+        distance_y = y1 - y2
+        
+        # Compute absolute angle from hunter to target (in global frame)
+        target_angle_global = np.arctan2(distance_y, distance_x)
+        
+        # Compute relative angle: difference between target direction and current heading
+        relative_angle = target_angle_global - phi2
+        
+        # Wrap angle to [-pi, pi] for shortest turn
+        while relative_angle > np.pi:
+            relative_angle -= 2 * np.pi
+        while relative_angle < -np.pi:
+            relative_angle += 2 * np.pi
+            
+        return relative_angle
+    
+    def estimate(self, measurement):
+        """Convert measurement to steering command"""
+        angle = measurement
+        return angle  # Proportional control gain
+    
 
-    def integrate(self, initial_state, t_end, dt=0.1):
+class Simulator:
+    def __init__(self, hunted, hunter):
+        self.hunter = hunter
+        self.hunted = hunted
+        
+    def integrate(self, initial_state, t_end, dt=0.01):  # Much smaller time step
+        """Integrate vehicle dynamics over time with high-frequency control updates"""
         def dynamics_wrapper(t, state):
-            return self.vehicle.dynamics(state, vehicle.control(t))
+            # Split the 8-dimensional state into hunted (0:4) and hunter (4:8)
+            state_hunted = state[0:4]
+            state_hunter = state[4:8]
+
+            # Get control inputs for both vehicles - this happens at every integration step
+            control_input_hunted = self.hunted.control(t, state_hunted)
+            control_input_hunter = self.hunter.control(t, state_hunter, state_hunted)
+
+            # Get dynamics derivatives for both vehicles
+            d_hunted = self.hunted.dynamics(state_hunted, control_input_hunted)
+            d_hunter = self.hunter.dynamics(state_hunter, control_input_hunter)
+            
+            # Combine derivatives into 8-dimensional vector
+            return d_hunted + d_hunter
         
+        # Use smaller max_step to ensure frequent control updates
         sol = solve_ivp(dynamics_wrapper, [0, t_end], initial_state, 
-                        method='RK45', dense_output=True)
+                        method='RK45', dense_output=True, max_step=0.01)
         
-        t_eval = np.arange(0, t_end + dt, dt)  # Equidistant time steps
+        # Generate output at desired frequency (can be different from integration step)
+        t_eval = np.arange(0, t_end + dt, dt)
         states = sol.sol(t_eval).T
+        self.sol = sol
         
         return t_eval, states
     
-    def get_control(self, control_func, times):
-        # Get a sample control output to determine dimensions
-        sample_control = control_func(times[0])
-        if np.isscalar(sample_control):
-            # Single control input
-            c = np.zeros(len(times))
-            for i, t in enumerate(times):
-                c[i] = control_func(t)
-        else:
-            # Multiple control inputs
-            control_dim = len(sample_control)
-            c = np.zeros((len(times), control_dim))
-            for i, t in enumerate(times):
-                c[i] = control_func(t)
+    def get_control(self, states, times):
+        """Get control inputs over time for both vehicles"""
+        # states is now 8-dimensional: [hunted_x, hunted_y, hunted_phi, hunted_v, hunter_x, hunter_y, hunter_phi, hunter_v]
+        n_times = len(times)
         
-        return c
+        # Initialize control arrays for both vehicles (2 controls each: acceleration, steering)
+        controls_hunted = np.zeros((n_times, 2))
+        controls_hunter = np.zeros((n_times, 2))
+        
+        for i, t in enumerate(times):
+            state_hunted = states[i, 0:4]
+            state_hunter = states[i, 4:8]
+            
+            # Get control inputs for both vehicles
+            controls_hunted[i] = self.hunted.control(t, state_hunted)
+            controls_hunter[i] = self.hunter.control(t, state_hunter, state_hunted)
+        
+        return controls_hunted, controls_hunter
     
-    def simulate(self, initial_state, t_end, dt):
+    def simulate(self, init_hunted, init_hunter, t_end, dt):
+        """Simulate both vehicles together"""
+        # Combine initial states into 8-dimensional vector
+        initial_state = init_hunted + init_hunter
         
         t, s = self.integrate(initial_state, t_end, dt)
+        c_hunted, c_hunter = self.get_control(s, t)
 
-        c = self.get_control(vehicle.control, t)
-
-        # Create dictionaries by zipping names with columns of the arrays
-        states = {key + " (state)": s[:, i] for i, key in enumerate(self.vehicle.get_state_names())}
+        # Split states back into hunted and hunter components
+        states_hunted = s[:, 0:4]  # First 4 columns for hunted vehicle
+        states_hunter = s[:, 4:8]  # Last 4 columns for hunter vehicle
         
-        # Handle both 1D and 2D control arrays
-        if c.ndim == 1:
-            controls = {self.vehicle.get_control_names()[0] + " (control)": c}
-        else:
-            controls = {key + " (control)": c[:, i] for i, key in enumerate(self.vehicle.get_control_names())}
+        # Create separate data dictionaries for hunted and hunter vehicles
+        hunted_states = {key: states_hunted[:, i] for i, key in enumerate(self.hunted.get_state_names())}
+        hunter_states = {key: states_hunter[:, i] for i, key in enumerate(self.hunter.get_state_names())}
+        
+        #hunted_controls = {key + " (control)": c_hunted[:, i] for i, key in enumerate(self.hunted.get_control_names())}
+        hunter_controls = {key + " (control)": c_hunter[:, i] for i, key in enumerate(self.hunter.get_control_names())}
         
         times = {"times": t}
-        data = {**times, **states, **controls}
         
-        return data
+        # Create separate data dictionaries
+        hunted_data = {**times, **hunted_states}
+        hunter_data = {**times, **hunter_states, **hunter_controls}
+        
+        return hunted_data, hunter_data
         
 
 class Visualizer():
@@ -104,9 +188,9 @@ class Visualizer():
         """
         # Extract position data from the hunted car dictionary
         times = data_dict["times"]
-        x_positions = data_dict["x_position (state)"]
-        y_positions = data_dict["y_position (state)"]
-        orientations = data_dict["orientation_angle (state)"]
+        x_positions = data_dict["x_position"]
+        y_positions = data_dict["y_position"]
+        orientations = data_dict["orientation_angle"]
         
         # Plot hunted car trajectory
         plt.figure(figsize=(12, 10))
@@ -122,9 +206,9 @@ class Visualizer():
         
         # Plot hunter car trajectory if provided
         if data_dict_hunt is not None:
-            x_positions_hunt = data_dict_hunt["x_position (state)"]
-            y_positions_hunt = data_dict_hunt["y_position (state)"]
-            orientations_hunt = data_dict_hunt["orientation_angle (state)"]
+            x_positions_hunt = data_dict_hunt["x_position"]
+            y_positions_hunt = data_dict_hunt["y_position"]
+            orientations_hunt = data_dict_hunt["orientation_angle"]
             
             plt.plot(x_positions_hunt, y_positions_hunt, 'r-', linewidth=2, label='Hunter Car Path')
             plt.plot(x_positions_hunt[0], y_positions_hunt[0], 'mo', markersize=10, label='Hunter Start')
@@ -145,31 +229,45 @@ class Visualizer():
         plt.show()
         
         print(f"Completed {len(times)} time steps")
-        print(f"Hunted car final position: ({x_positions[-1]:.1f}, {y_positions[-1]:.1f})")
-        if data_dict_hunt is not None:
-            print(f"Hunter car final position: ({x_positions_hunt[-1]:.1f}, {y_positions_hunt[-1]:.1f})")
+        # print(f"Hunted car final position: ({x_positions[-1]:.1f}, {y_positions[-1]:.1f})")
+        # if data_dict_hunt is not None:
+        #     print(f"Hunter car final position: ({x_positions_hunt[-1]:.1f}, {y_positions_hunt[-1]:.1f})")
 
-    def dynamicPosition2D(self, data_dict, dt=0.1):
+    def dynamicPosition2D(self, hunted_data, hunter_data=None, dt=0.05):
         """
         Animate vehicle trajectory dynamically from simulation data dictionary
         
         Args:
-            data_dict: Dictionary with simulation data (same format as stateHistory)
+            hunted_data: Dictionary with hunted vehicle simulation data
+            hunter_data: Dictionary with hunter vehicle simulation data (optional)
             dt: Animation delay between frames
         """
-        # Extract data from the dictionary
-        times = data_dict["times"]
-        x_positions = data_dict["x_position (state)"]
-        y_positions = data_dict["y_position (state)"]
-        orientations = data_dict["orientation_angle (state)"]
-        velocities = data_dict["velocity (state)"]
+        # Extract data from the hunted vehicle dictionary
+        times = hunted_data["times"]
+        x_positions_hunted = hunted_data["x_position"]
+        y_positions_hunted = hunted_data["y_position"]
+        orientations_hunted = hunted_data["orientation_angle"]
+        velocities_hunted = hunted_data["velocity"]
+        
+        # Extract hunter data if provided
+        if hunter_data is not None:
+            x_positions_hunter = hunter_data["x_position"]
+            y_positions_hunter = hunter_data["y_position"]
+            orientations_hunter = hunter_data["orientation_angle"]
+            velocities_hunter = hunter_data["velocity"]
         
         plt.ion()  # Turn on interactive mode
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(12, 10))
         
-        # Set plot limits based on trajectory
-        x_min, x_max = np.min(x_positions) - 5, np.max(x_positions) + 5
-        y_min, y_max = np.min(y_positions) - 5, np.max(y_positions) + 5
+        # Set plot limits based on both trajectories
+        all_x = x_positions_hunted
+        all_y = y_positions_hunted
+        if hunter_data is not None:
+            all_x = np.concatenate([x_positions_hunted, x_positions_hunter])
+            all_y = np.concatenate([y_positions_hunted, y_positions_hunter])
+            
+        x_min, x_max = np.min(all_x) - 5, np.max(all_x) + 5
+        y_min, y_max = np.min(all_y) - 5, np.max(all_y) + 5
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
         ax.set_xlabel('X [m]')
@@ -178,52 +276,98 @@ class Visualizer():
         ax.grid(True)
         ax.axis('equal')
         
-        # Initialize plot elements
-        trail, = ax.plot([], [], 'b-', alpha=0.5, linewidth=1, label='Trail')
-        vehicle, = ax.plot([], [], 'ro', markersize=10, label='Vehicle')
-        arrow = None
+        # Initialize plot elements for hunted vehicle
+        trail_hunted, = ax.plot([], [], 'b-', alpha=0.6, linewidth=2, label='Hunted Trail')
+        vehicle_hunted, = ax.plot([], [], 'bo', markersize=12, label='Hunted Vehicle')
+        arrow_hunted = None
+        
+        # Initialize plot elements for hunter vehicle if present
+        if hunter_data is not None:
+            trail_hunter, = ax.plot([], [], 'r-', alpha=0.6, linewidth=2, label='Hunter Trail')
+            vehicle_hunter, = ax.plot([], [], 'ro', markersize=12, label='Hunter Vehicle')
+            arrow_hunter = None
+        
         ax.legend()
         
         # Animate through each time step
         for i, t_current in enumerate(times):
-            x, y = x_positions[i], y_positions[i]
-            phi, v = orientations[i], velocities[i]
+            # Update hunted vehicle
+            x_h, y_h = x_positions_hunted[i], y_positions_hunted[i]
+            phi_h, v_h = orientations_hunted[i], velocities_hunted[i]
             
-            # Update trail (path so far)
-            trail.set_data(x_positions[:i+1], y_positions[:i+1])
+            # Update hunted trail (path so far)
+            trail_hunted.set_data(x_positions_hunted[:i+1], y_positions_hunted[:i+1])
             
-            # Update vehicle position
-            vehicle.set_data([x], [y])
+            # Update hunted vehicle position
+            vehicle_hunted.set_data([x_h], [y_h])
             
-            # Remove previous arrow and add new one
-            if arrow is not None:
-                arrow.remove()
-            dx, dy = v * np.cos(phi), v * np.sin(phi)
-            arrow = ax.arrow(x, y, dx/5, dy/5, head_width=0.5, head_length=0.5, 
-                            fc='red', ec='red', alpha=0.8)
+            # Remove previous arrow and add new one for hunted vehicle
+            if arrow_hunted is not None:
+                arrow_hunted.remove()
+            dx_h, dy_h = 3 * np.cos(phi_h), 3 * np.sin(phi_h)
+            arrow_hunted = ax.arrow(x_h, y_h, dx_h/2, dy_h/2, head_width=0.8, head_length=0.8, 
+                                   fc='blue', ec='blue', alpha=0.8)
             
-            # Update title with current info
-            ax.set_title(f'Vehicle Motion - t={t_current:.1f}s, v={v:.1f}m/s')
+            # Update hunter vehicle if present
+            if hunter_data is not None:
+                x_hunt, y_hunt = x_positions_hunter[i], y_positions_hunter[i]
+                phi_hunt, v_hunt = orientations_hunter[i], velocities_hunter[i]
+                
+                # Update hunter trail
+                trail_hunter.set_data(x_positions_hunter[:i+1], y_positions_hunter[:i+1])
+                
+                # Update hunter vehicle position
+                vehicle_hunter.set_data([x_hunt], [y_hunt])
+                
+                # Remove previous arrow and add new one for hunter vehicle
+                if arrow_hunter is not None:
+                    arrow_hunter.remove()
+                dx_hunt, dy_hunt = 3 * np.cos(phi_hunt), 3 * np.sin(phi_hunt)
+                arrow_hunter = ax.arrow(x_hunt, y_hunt, dx_hunt/2, dy_hunt/2, head_width=0.8, head_length=0.8, 
+                                       fc='red', ec='red', alpha=0.8)
+                
+                # Calculate distance between vehicles
+                distance = np.sqrt((x_hunt - x_h)**2 + (y_hunt - y_h)**2)
+                
+                # Update title with current info for both vehicles
+                ax.set_title(f'Hunter-Prey Simulation - t={t_current:.1f}s\n'
+                           f'Hunted: v={v_h:.1f}m/s | Hunter: v={v_hunt:.1f}m/s | Distance: {distance:.1f}m')
+            else:
+                # Update title with current info for single vehicle
+                ax.set_title(f'Vehicle Motion - t={t_current:.1f}s, v={v_h:.1f}m/s')
             
             plt.draw()
-            plt.pause(dt)  # This forces the plot to update
+            plt.pause(dt)  # Animation delay
         
         plt.ioff()  # Turn off interactive mode
         plt.show()
 
 
-    def stateHistory(self, data_dict, subplot_layout=None):
+    def stateHistory(self, sim_data_hunted, sim_data_hunter, subplot_layout=None):
         """
         Plot multiple time series in subplots
         
         Args:
-            times: Time array
-            data_dict: Dictionary with keys as plot labels and values as data arrays
+            sim_data_hunted: Dictionary with hunted vehicle data
+            sim_data_hunter: Dictionary with hunter vehicle data  
             subplot_layout: Tuple (rows, cols) or None for automatic layout
         """
-        n_plots = len(data_dict)
-
-        times = data_dict["times"]
+        times = sim_data_hunted["times"]
+        
+        # Collect all data to plot (excluding "times" key)
+        plot_data = []
+        
+        # Add hunted vehicle data
+        for key, data in sim_data_hunted.items():
+            if key != "times":
+                plot_data.append((f"{key} (hunted)", data, 'blue'))
+        
+        # Add hunter vehicle data
+        for key, data in sim_data_hunter.items():
+            if key != "times":
+                plot_data.append((f"{key} (hunter)", data, 'red'))
+        
+        n_plots = len(plot_data)
         
         # Determine subplot layout
         if subplot_layout is None:
@@ -250,16 +394,15 @@ class Visualizer():
         else:
             axes = axes.flatten()
         
-        colors = ['b', 'g', 'r', 'm', 'c', 'y', 'k', 'orange', 'purple']
-        
-        for i, (label, data) in enumerate(data_dict.items()):
+        # Plot each data series
+        for i, (label, data, color) in enumerate(plot_data):
             if i < len(axes):
-                color = colors[i % len(colors)]
-                axes[i].plot(times, data, color=color, linewidth=2)
+                axes[i].plot(times, data, color=color, linewidth=2, label=label)
                 axes[i].set_xlabel('Time [s]')
                 axes[i].set_ylabel(label)
                 axes[i].set_title(f'{label} vs Time')
                 axes[i].grid(True)
+                axes[i].legend()
         
         # Hide unused subplots
         for i in range(n_plots, len(axes)):
@@ -269,62 +412,36 @@ class Visualizer():
         plt.show()
 
 
-
 if __name__ == "__main__":
 
-    # Simulate hunted car:
-    
-    # Initial state: [x, y, phi, v]
-    initial_state = [0.0, 0.0, 0.0, 3.0]
-    states_docu = ["x_position", "y_position","orientation_angle","velocity"]
-
-    vehicle = Vehicle(states_docu)
-    vehicle.set_hunted_control()
-    
-    vis = Visualizer()
-    sim = Simulator(vehicle, )
-    sim_data = sim.simulate(initial_state, 20.0, 0.1)
-    #vis.dynamicPosition2D(sim_data)
-    
-    # Create hunting car
-
+    # Create both vehicles
+    initial_state_hunted = [0.0, 0.0, 0.0, 3.0]  # [x, y, phi, v]
     initial_state_hunter = [10.0, 5.0, np.pi/4, 4.0]  # Different position, angle, and speed
-    states_docu_hunter = ["x_position", "y_position", "orientation_angle", "velocity"]
     
-    # Create hunter vehicle
-    hunter_vehicle = Vehicle(states_docu_hunter)
-    hunter_vehicle.set_hunted_control()
+    states_docu = ["x_position", "y_position", "orientation_angle", "velocity"]
     
-    # Set different control for hunter car
-    # def hunter_control(t):
-    #     # More aggressive maneuvering for hunting behavior
-    #     angl = np.sin(t * 0.3) * 0.4  # Oscillating steering pattern
-    #     acce = 0.2 + 0.1 * np.cos(t * 0.2)  # Variable acceleration
-    #     return [acce, angl]
+    hunted_vehicle = HuntedVehicle(states_docu)
+    hunter_vehicle = HunterVehicle(states_docu)
     
-    # hunter_vehicle.control_docu = ["acceleration", "steer_angle"]
-    # hunter_vehicle.control = hunter_control
+    # Create combined simulator
+    sim = Simulator(hunted_vehicle, hunter_vehicle)
     
-    sim_hunter = Simulator(hunter_vehicle)
-    sim_data_hunter = sim_hunter.simulate(initial_state_hunter, 20.0, 0.1)
+    print("Starting combined simulation...")
+    sim_data_hunted, sim_data_hunter = sim.simulate(initial_state_hunted, initial_state_hunter, 20.0, 0.1)
+    print("Simulation completed!")
     
-    # Combine both simulation data into one dictionary
-    # Add "hunter: " prefix to hunter car keys to distinguish them
-    combined_data = sim_data.copy()  # Start with hunted car data
+    # Visualize results
+    vis = Visualizer()
     
-    for key, value in sim_data_hunter.items():
-        if key == "times":
-            # Keep only one times array (they should be the same)
-            continue
-        else:
-            # Add hunter prefix to distinguish from hunted car
-            combined_data["hunter: " + key] = value
+    # Static trajectory plot
+    # vis.staticPosition2D(sim_data_hunted, sim_data_hunter)
     
-    # Plot both cars' data in one visualization
-    # vis.stateHistory(combined_data)
-
-    # TODO: plot the two trajectories static in a 2D plane
-    vis.staticPosition2D(sim_data, sim_data_hunter)
+    # Dynamic animation of the chase
+    print("Starting dynamic animation...")
+    vis.dynamicPosition2D(sim_data_hunted, sim_data_hunter, dt=0.02)  # Fast animation
+    
+    # State history plots
+    # vis.stateHistory(sim_data_hunted, sim_data_hunter)
 
 
 
