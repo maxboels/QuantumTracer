@@ -30,9 +30,9 @@ class ActuatorControls:
             return
         
         # LOW SPEED OVERRIDE
-        fwd_bck_pwm.ChangeDutyCycle(0 if speed < 0.1 else 10)
+        # fwd_bck_pwm.ChangeDutyCycle(0 if speed < 0.1 else 10)
         
-        # fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
+        fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
 
     def set_steering_angle(self, angle):
         if angle < -1 or angle > 1:
