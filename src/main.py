@@ -18,6 +18,28 @@ _outlier_fraction = 0.5      # if a new measurement jumps more than 50% from the
 _last_proc_time = 0.0        # remembers the time we last processed a frame, used to control how often we run heavy code
 _min_proc_dt = 0.0           # minimum time (seconds) between frame processing; 0.04 = ~25Hz cap, 0.0 = process every frame
 
+def compute_distance_uncertainty(S_m, f_px, p_px,
+                                 sigma_S_frac=0.02, sigma_f_frac=0.03, sigma_p_px=0.7):
+    rel_S = sigma_S_frac
+    rel_f = sigma_f_frac
+    rel_p = sigma_p_px / max(1.0, p_px)
+    rel_total = math.sqrt(rel_S*rel_S + rel_f*rel_f + rel_p*rel_p)
+    return rel_total
+
+_prev_distance = None
+_prev_angle = None
+
+def smooth_and_reject(d, a, alpha=_smooth_alpha, outlier_frac=_outlier_fraction):
+    global _prev_distance, _prev_angle
+    if _prev_distance is None:
+        _prev_distance, _prev_angle = d, a
+        return d, a, False
+    if abs(d - _prev_distance) > outlier_frac * max(1e-6, _prev_distance):
+        return _prev_distance, _prev_angle, True
+    d_s = alpha * d + (1.0 - alpha) * _prev_distance
+    a_s = alpha * a + (1.0 - alpha) * _prev_angle
+    _prev_distance, _prev_angle = d_s, a_s
+    return d_s, a_s, False
 
 
 output_dir = "saved_frames"  # Directory to save frames
@@ -69,6 +91,16 @@ def process_frame(request):
     distance, angle = distance_angle
     print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
 
+    rel_unc = compute_distance_uncertainty(S_m, f_px, diameter)
+    abs_unc = rel_unc * distance
+    print(f"dist={distance:.2f}m ±{abs_unc:.2f}m ({rel_unc*100:.1f}%)")
+
+    dist_s, ang_s, rejected = smooth_and_reject(distance, angle)
+    if rejected:
+        print("Outlier detected. Skipping actuation.")
+        return
+
+
 
     # Determine steering and throttle from estimated object position
     throttle_angle = ctrl.get_command(distance, angle)
@@ -103,6 +135,25 @@ def main():
     picam2 = Picamera2()
     picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}))
     picam2.post_callback = process_frame
+
+    # Example manual controls. Tune ExposureTime and AnalogueGain for your lighting.
+try:
+    controls = {
+        "ExposureTime": 10000,    # microseconds; adjust to suit your lighting
+        "AnalogueGain": 1.0,
+        "AwbEnable": False,
+        "ColourGains": (1.0, 1.0)
+    }
+    picam2.set_controls(controls)
+except Exception as e:
+    print("Warning: could not set Picamera2 controls:", e)
+
+# Try to set AF to manual if API supports it
+try:
+    picam2.set_controls({"AfMode": 0})
+except Exception:
+    pass
+    
     picam2.start()
 
     # Keep the script alive
