@@ -1,6 +1,7 @@
 from picamera2 import Picamera2
 import os
 from datetime import datetime
+from src.position_estimation import PositionEstimator
 from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
@@ -18,7 +19,8 @@ STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
 
 detector = BasicDetector()
-ctrl = BasicController(detector, params={"lookup_csv": "src/px_to_m.csv"}, img_size=FRAME_WIDTH)
+estimator = PositionEstimator(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
+ctrl = BasicController()
 actuator = ActuatorControls()
 
 streamer = None
@@ -47,8 +49,18 @@ def process_frame(request):
 
     print(f"Detected object at {coords} with diameter {diameter}px")
 
+    # Estimate distance and angle to object
+    distance_angle = estimator.estimate(coords, diameter)
+    if distance_angle is None:
+        print("Position estimation failed")
+        sleep(0.02)
+        return
+    distance, angle = distance_angle
+    print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
+
+
     # Determine steering and throttle from estimated object position
-    throttle_angle = ctrl.get_command(coords, diameter)
+    throttle_angle = ctrl.get_command(distance, angle)
     if throttle_angle is None:
         print("Steering control could not be determined. Keeping course unchanged.")
         return
