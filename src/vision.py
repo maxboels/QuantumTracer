@@ -4,6 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 import time
+import queue
 
 class BasicDetector:
     def __init__(self,
@@ -46,7 +47,7 @@ class BasicDetector:
     if area < self.min_area_px:
         return None, None, mask
 
-    # Prefer ellipse fit (sub-pixel floats). Fallback to minEnclosingCircle.
+    # Prefer sub-pixel ellipse fit. Fallback to minEnclosingCircle.
     if len(c) >= 5:
         ellipse = cv2.fitEllipse(c)            # ((x,y),(w,h),angle)
         (x, y), (w, h), ang = ellipse
@@ -81,21 +82,21 @@ class BasicDetector:
         # Panel 3: Overlay with circle + green midpoint dot
         overlay = orig_bgr.copy()
         if center is not None and diam is not None and diam > 0:
-            # center is (x_px, y_px)
             x_draw = int(round(center[0]))
             y_draw = int(round(center[1]))
             radius = int(max(1, round(diam / 2.0)))
             cv2.circle(overlay, (x_draw, y_draw), radius, (0, 255, 0), 2)
             cv2.circle(overlay, (x_draw, y_draw), 6, (0, 255, 0), -1)
             cv2.putText(overlay, f"(x={center[0]:.1f}, y={center[1]:.1f}), d={diam:.2f}px",
-                        (10, 60), label_font, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                (10, 60), label_font, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
         else:
             cv2.putText(overlay, "No detection", (10, 60),
-                        label_font, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+                label_font, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
+        # static header for the overlay panel
+        cv2.putText(overlay, "Circle + midpoint", (10, 30),
+            label_font, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-            cv2.putText(overlay, "Circle + midpoint", (10, 30),
-                        label_font, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
         # Stack panels
         h = orig_bgr.shape[0]
