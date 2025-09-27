@@ -57,7 +57,15 @@ class HunterVehicle(BaseVehicle):
             
             # Estimate steering command
             angle = self.estimate(angle_to_target)
-            angle_steer = 0.3 * angle
+            # print("pure ", angle)
+            # if angle < -np.pi/2 and angle < 0:
+            #     angle = np.pi + angle
+            # elif angle > np.pi/2 and angle > 0:
+            #     angle = angle - np.pi
+
+            print("adjusted: ",angle)
+
+            angle_steer = 0.5 * angle
             acceleration = 0.0  # Constant speed hunting
             
             return [acceleration, angle_steer]
@@ -416,7 +424,7 @@ if __name__ == "__main__":
 
     # Create both vehicles
     initial_state_hunted = [0.0, 0.0, 0.0, 3.0]  # [x, y, phi, v]
-    initial_state_hunter = [10.0, 5.0, np.pi/4, 4.0]  # Different position, angle, and speed
+    initial_state_hunter = [10.0, 5.0, 0.1, 4.0]  # Different position, angle, and speed
     
     states_docu = ["x_position", "y_position", "orientation_angle", "velocity"]
     
@@ -434,11 +442,11 @@ if __name__ == "__main__":
     vis = Visualizer()
     
     # Static trajectory plot
-    # vis.staticPosition2D(sim_data_hunted, sim_data_hunter)
+    vis.staticPosition2D(sim_data_hunted, sim_data_hunter)
     
     # Dynamic animation of the chase
     print("Starting dynamic animation...")
-    vis.dynamicPosition2D(sim_data_hunted, sim_data_hunter, dt=0.02)  # Fast animation
+    # vis.dynamicPosition2D(sim_data_hunted, sim_data_hunter, dt=0.02)  # Fast animation
     
     # State history plots
     # vis.stateHistory(sim_data_hunted, sim_data_hunter)
