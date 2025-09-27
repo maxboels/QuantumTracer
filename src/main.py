@@ -6,10 +6,9 @@ from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
 import time
-import math
-import queue
 
-
+_last_proc_time = 0.0
+_min_proc_dt = 0.0
 
 
 output_dir = "saved_frames"
@@ -60,7 +59,7 @@ def process_frame(request):
 
     
 
-    throttle_angle = ctrl.get_command(dist_s, ang_s)
+    throttle_angle = ctrl.get_command(distance, angle)
     if throttle_angle is None:
         print("Steering control could not be determined. Keeping course unchanged.")
         return

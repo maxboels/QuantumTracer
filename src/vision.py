@@ -4,35 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 import time
-import queue
 
-# --- Globals for smoothing and frame timing ---
-_smooth_alpha = 0.6
-_outlier_fraction = 0.5
-_last_proc_time = 0.0
-_min_proc_dt = 0.0
-
-def compute_distance_uncertainty(S_m, f_px, p_px,
-                                 sigma_S_frac=0.02, sigma_f_frac=0.03, sigma_p_px=0.7):
-    rel_S = sigma_S_frac
-    rel_f = sigma_f_frac
-    rel_p = sigma_p_px / max(1.0, p_px)
-    return math.sqrt(rel_S*rel_S + rel_f*rel_f + rel_p*rel_p)
-
-_prev_distance = None
-_prev_angle = None
-
-def smooth_and_reject(d, a, alpha=_smooth_alpha, outlier_frac=_outlier_fraction):
-    global _prev_distance, _prev_angle
-    if _prev_distance is None:
-        _prev_distance, _prev_angle = d, a
-        return d, a, False
-    if abs(d - _prev_distance) > outlier_frac * max(1e-6, _prev_distance):
-        return _prev_distance, _prev_angle, True
-    d_s = alpha * d + (1.0 - alpha) * _prev_distance
-    a_s = alpha * a + (1.0 - alpha) * _prev_angle
-    _prev_distance, _prev_angle = d_s, a_s
-    return d_s, a_s, False
     
 class BasicDetector:
     def __init__(self,
@@ -50,58 +22,43 @@ class BasicDetector:
         self.min_area_px = min_area_px
 
     def analyse_img(self, img_rgb):
-    """
-    Returns:
-      center: (x_px, y_px) as floats (None if no detection)
-      diameter: float in pixels (None if no detection)
-      mask: binary mask (numpy array)
-    """
-    if img_rgb is None:
-        return None, None, None
+        """
+        Returns:
+        center: (x_px, y_px) as floats (None if no detection)
+        diameter: float in pixels (None if no detection)
+        mask: binary mask (numpy array)
+        """
+        if img_rgb is None:
+            return None, None, None
 
-    img_u8 = img_rgb.astype(np.uint8)
-    hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
-    mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
-    mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
-    mask = cv2.bitwise_or(mask1, mask2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
+        img_u8 = img_rgb.astype(np.uint8)
+        hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
+        mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
+        mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
+        mask = cv2.bitwise_or(mask1, mask2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
 
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
-        return None, None, mask
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return None, None, mask
 
-    c = max(cnts, key=cv2.contourArea)
-    area = cv2.contourArea(c)
-    if area < self.min_area_px:
-        return None, None, mask
+        c = max(cnts, key=cv2.contourArea)
+        area = cv2.contourArea(c)
+        if area < self.min_area_px:
+            return None, None, mask
 
-    # Prefer sub-pixel ellipse fit. Fallback to minEnclosingCircle.
-    if len(c) >= 5:
-        ellipse = cv2.fitEllipse(c)            # ((x,y),(w,h),angle)
-        (x, y), (w, h), ang = ellipse
-        diameter = float((w + h) / 2.0)       # fractional px
-        center = (float(x), float(y))         # (x_px, y_px)
-    else:
-        (x, y), radius = cv2.minEnclosingCircle(c)
-        diameter = float(2.0 * radius)
-        center = (float(x), float(y))
+        # Prefer sub-pixel ellipse fit. Fallback to minEnclosingCircle.
+        if len(c) >= 5:
+            ellipse = cv2.fitEllipse(c)            # ((x,y),(w,h),angle)
+            (x, y), (w, h), ang = ellipse
+            diameter = float((w + h) / 2.0)       # fractional px
+            center = (float(x), float(y))         # (x_px, y_px)
+        else:
+            (x, y), radius = cv2.minEnclosingCircle(c)
+            diameter = float(2.0 * radius)
+            center = (float(x), float(y))
 
-    # Uncertainty (use estimator.f_px if available)
-    S_m = 0.125  # balloon diameter in meters (fallback)
-    f_px = getattr(estimator, "f_px", None)
-    if f_px is None:
-        f_px = 4.74 * FRAME_WIDTH / 6.45
-    rel_unc = compute_distance_uncertainty(S_m, f_px, diameter)
-    abs_unc = rel_unc * distance
-    print(f"Detected center={coords}, diam={diameter:.2f}px -> dist={distance:.2f}m ±{abs_unc:.2f}m ({rel_unc*100:.1f}%) angle={angle:.2f}°")
-
-    # Smooth and reject outliers. Use smoothed values for control.
-    dist_s, ang_s, rejected = smooth_and_reject(distance, angle)
-    if rejected:
-        print("Outlier detected. Skipping actuation.")
-        return None, None, mask
-
-    return center, diameter, mask
+        return center, diameter, mask
 
   
 
