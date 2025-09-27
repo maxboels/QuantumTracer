@@ -41,7 +41,6 @@ class PositionEstimator:
                 self.lookup = None
         # parameters
         self.steer_scale = float(self.params.get("steer_scale", 0.45))
-        self.Kp_dist = float(self.params.get("Kp_dist", 0.7))
         self.desired_dist = float(self.params.get("desired_dist_m", 0.6))
         self.collision_threshold = float(self.params.get("collision_threshold_m", 0.45))
         self.lunge_power = float(self.params.get("lunge_power_pct", 0.85))
@@ -56,26 +55,45 @@ class PositionEstimator:
         self.max_dist_m = float(self.params.get("max_dist_m", 50.0))
 
     def _diameter_to_distance(self, diam_px):
+
         if diam_px is None or diam_px <= 0:
             return None
+
         # if lookup available and diam in range, prefer interpolation
-        if self.lookup is not None:
-            print("Using lookup table for distance estimation")
-            pxs, ds = self.lookup
-            # if diam within table range
-            if diam_px < pxs.min():
-                diam_px = pxs.min()
-            elif diam_px > pxs.max():
-                diam_px = pxs.max()
+        # if self.lookup is not None:
+        #     pxs, ds = self.lookup
+        #     # if diam within table range
+        #     if diam_px >= pxs.min() and diam_px <= pxs.max():
+        #         return float(np.interp(diam_px, pxs, ds))
+        # if calibration constant k available use direct k/px
+        if self.k:
+            z = (self.k / float(diam_px))
+            return float(np.clip(z, self.min_dist_m, self.max_dist_m))
+        # fallback to pinhole: z = (W * f) / px
+        if self.target_w > 0 and self.f_px > 0:
+            z = (self.target_w * self.f_px) / float(diam_px)
+            return float(np.clip(z, self.min_dist_m, self.max_dist_m))
+        return None
+        # if diam_px is None or diam_px <= 0:
+        #     return None
+        # # if lookup available and diam in range, prefer interpolation
+        # if self.lookup is not None:
+        #     print("Using lookup table for distance estimation")
+        #     pxs, ds = self.lookup
+        #     # if diam within table range
+        #     if diam_px < pxs.min():
+        #         diam_px = pxs.min()
+        #     elif diam_px > pxs.max():
+        #         diam_px = pxs.max()
 
-            print(f"Interpolating distance for diameter {diam_px}px")
+        #     print(f"Interpolating distance for diameter {diam_px}px")
 
-            # if diam_px >= pxs.min() and diam_px <= pxs.max():
-            return float(np.interp(diam_px, pxs, ds))
+        #     # if diam_px >= pxs.min() and diam_px <= pxs.max():
+        #     return float(np.interp(diam_px, pxs, ds))
         
     
-        print("Lookup table not available or diam out of range, using fallback method")
-        return None
+        # print("Lookup table not available or diam out of range, using fallback method")
+        # return None
 
     def estimate(self, coords, diam):
         cy, cx = coords
