@@ -39,9 +39,14 @@ class ActuatorControls:
             return
         
         print(f"IT HAS BEEN {time.time() - self.last_fwd_command_time} SECONDS SINCE LAST COMMAND")
-        self.last_fwd_command_time = time.time()
+
+        if speed < 0.05:
+            duty_cycle = 0
+        else:
+            duty_cycle = 10 + speed * 60 * SPEED_DAMPING_FACTOR
         
-        fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
+        self.last_fwd_command_time = time.time()
+        fwd_bck_pwm.ChangeDutyCycle(int(duty_cycle))
 
     def set_steering_angle(self, angle):
         if angle < -1 or angle > 1:
