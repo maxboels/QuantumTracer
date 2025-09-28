@@ -50,3 +50,6 @@ lookup_px_to_m.csv
 # OS
 Thumbs.db
 .DS_Store
+src/imitation_learning/data/episode_*/episode_*/frames/frame_*.jpg
+
+src/imitation_learning/data/episode_*/
