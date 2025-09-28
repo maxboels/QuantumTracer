@@ -2,9 +2,19 @@
 import numpy as np
 
 class BasicController:
-    def __init__(self, params: dict = {}):
-        self.Kp_dist = float(params.get("Kp_dist", 0.7))
+    def __init__(self, Kp_dist=0.7, frame_rate=5):
+        self.Kp_dist = Kp_dist
+        self.frame_rate = frame_rate
 
+
+    def default_movement(self):
+
+        throttle = 0.3
+
+        if np.random.rand() > max(0.1, 1 - 1 / self.frame_rate):
+            self.default_movement_angle *= -1
+
+        return throttle, self.default_movement_angle
 
     def get_command(self, distance, angle):
         """

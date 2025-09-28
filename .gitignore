@@ -1,8 +1,20 @@
 ﻿# Python / project
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
 *.pyo
 *.pyd
+*.cpython-*
+.Python
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.egg-info/
+dist/
+build/
 
 # virtual env
 .venv/
@@ -13,6 +25,19 @@ env/
 logs/
 *.log
 logs/**
+outputs/
+episode_animations/
+signal_analysis/
+*.csv
+*.gif
+*.mp4
+*.avi
+*.pth
+checkpoints/
+wandb/
+tensorboard_logs/
+test_*output/
+*_output/
 
 # IDE
 .vscode/
@@ -25,3 +50,6 @@ lookup_px_to_m.csv
 # OS
 Thumbs.db
 .DS_Store
+src/imitation_learning/data/episode_*/episode_*/frames/frame_*.jpg
+
+src/imitation_learning/data/episode_*/

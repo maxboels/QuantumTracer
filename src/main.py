@@ -8,7 +8,6 @@ from actuator_controls import ActuatorControls
 import time
 
 _last_proc_time = 0.0
-_min_proc_dt = 0.5
 
 
 output_dir = "saved_frames"
@@ -20,12 +19,13 @@ TIMEOUT = int(os.getenv("TIMEOUT", "20"))  # seconds
 STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
 
+FRAME_RATE = 5
+
+_min_proc_dt = 1.0 / FRAME_RATE if FRAME_RATE > 0 else 0.0
+
 detector = BasicDetector()
 estimator = PositionEstimator(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
-ctrl = BasicController()
-# estimator = PositionEstimator(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
-# ctrl = BasicController(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
-# ctrl = BasicController(detector, params={"lookup_csv": "px_to_m.csv"}, img_size=FRAME_WIDTH)
+ctrl = BasicController(Kp_dist=0.7, frame_rate=FRAME_RATE)
 actuator = ActuatorControls()
 
 streamer = MJPEGStreamer(port=STREAM_PORT) if STREAMING_ENABLED else None
@@ -61,15 +61,16 @@ def process_frame(request):
     # Estimate distance and angle to object
     distance_angle = estimator.estimate(coords, diameter)
     if distance_angle is None:
-        print("Position estimation failed")
-        # sleep(0.02)
-        return
-    distance, angle = distance_angle
-    print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
+        print("Position estimation failed. Falling back to default movement.")
+        throttle_angle = ctrl.default_movement()
 
+    else:
+        distance, angle = distance_angle
+        print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
 
-    # Determine steering and throttle from estimated object position
-    throttle_angle = ctrl.get_command(distance, angle)
+        # Determine steering and throttle from estimated object position
+        throttle_angle = ctrl.get_command(distance, angle)
+
     if throttle_angle is None:
         print("Steering control could not be determined. Keeping course unchanged.")
         return
@@ -105,7 +106,7 @@ def main():
         print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/")
 
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}, controls={"FrameRate": 2}))
+    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}, controls={"FrameRate": FRAME_RATE}))
     picam2.post_callback = process_frame_wrapper
 
     # Lock camera controls for stable geometry (daytime indoors/outdoors)
