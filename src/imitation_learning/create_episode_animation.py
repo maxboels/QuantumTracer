@@ -65,7 +65,7 @@ def load_episode_data(episode_dir: Path):
     
     return synchronized_data
 
-def create_episode_animation(episode_dir: Path, output_dir: Path, fps: int = 10):
+def create_episode_animation(episode_dir: Path, output_dir: Path, fps: int = 10, output_format: str = 'mp4'):
     """Create animated video for a single episode"""
     
     print(f"🎬 Creating animation for {episode_dir.name}...")
@@ -201,39 +201,106 @@ def create_episode_animation(episode_dir: Path, output_dir: Path, fps: int = 10)
         interval=1000//fps, blit=True, repeat=True
     )
     
-    # Save animation
-    output_file = output_dir / f"{episode_dir.name}_animation.mp4"
+    # Save animation with multiple codec options
+    if output_format.lower() == 'mp4':
+        output_file = output_dir / f"{episode_dir.name}_animation.mp4"
+        
+        # Try multiple MP4 codecs in order of preference
+        mp4_writers = [
+            # Option 1: H.264 with libx264 (best compatibility)
+            {
+                'name': 'ffmpeg_libx264',
+                'codec': 'libx264',
+                'extra_args': ['-pix_fmt', 'yuv420p'],
+                'bitrate': 1800
+            },
+            # Option 2: Default ffmpeg
+            {
+                'name': 'ffmpeg',
+                'codec': None,
+                'extra_args': [],
+                'bitrate': 1800
+            },
+            # Option 3: H.264 with different settings
+            {
+                'name': 'ffmpeg_h264',
+                'codec': 'h264',
+                'extra_args': ['-pix_fmt', 'yuv420p', '-crf', '23'],
+                'bitrate': None
+            }
+        ]
+        
+        saved_successfully = False
+        for writer_config in mp4_writers:
+            try:
+                print(f"🎥 Trying {writer_config['name']} codec...")
+                
+                # Configure writer
+                if 'ffmpeg' in writer_config['name']:
+                    Writer = animation.writers['ffmpeg']
+                    writer_kwargs = {
+                        'fps': fps,
+                        'metadata': dict(artist='QuantumTracer'),
+                        'extra_args': writer_config['extra_args']
+                    }
+                    
+                    if writer_config['bitrate']:
+                        writer_kwargs['bitrate'] = writer_config['bitrate']
+                    
+                    if writer_config['codec']:
+                        writer_kwargs['codec'] = writer_config['codec']
+                    
+                    writer = Writer(**writer_kwargs)
+                else:
+                    continue  # Skip unknown writers
+                
+                anim.save(str(output_file), writer=writer)
+                plt.close(fig)
+                
+                print(f"✅ MP4 animation saved: {output_file}")
+                return str(output_file)
+                
+            except Exception as e:
+                print(f"❌ {writer_config['name']} failed: {e}")
+                continue
+        
+        # If all MP4 attempts failed, fall back to GIF
+        if not saved_successfully:
+            print("⚠️  All MP4 codecs failed, falling back to GIF...")
+            try:
+                output_file_gif = output_dir / f"{episode_dir.name}_animation.gif"
+                anim.save(str(output_file_gif), writer='pillow', fps=fps)
+                plt.close(fig)
+                
+                print(f"✅ GIF animation saved: {output_file_gif}")
+                return str(output_file_gif)
+                
+            except Exception as e2:
+                print(f"❌ Error saving GIF: {e2}")
+                plt.close(fig)
+                return None
     
-    try:
-        # Use ffmpeg writer for better quality
-        Writer = animation.writers['ffmpeg']
-        writer = Writer(fps=fps, metadata=dict(artist='QuantumTracer'), bitrate=1800)
-        
-        anim.save(str(output_file), writer=writer)
-        plt.close(fig)
-        
-        print(f"✅ Animation saved: {output_file}")
-        return str(output_file)
-        
-    except Exception as e:
-        print(f"❌ Error saving animation: {e}")
-        print("   Trying alternative format...")
-        
+    elif output_format.lower() == 'gif':
+        # Direct GIF output
+        output_file = output_dir / f"{episode_dir.name}_animation.gif"
         try:
-            # Fallback to pillow writer
-            output_file_gif = output_dir / f"{episode_dir.name}_animation.gif"
-            anim.save(str(output_file_gif), writer='pillow', fps=fps)
+            anim.save(str(output_file), writer='pillow', fps=fps)
             plt.close(fig)
             
-            print(f"✅ GIF animation saved: {output_file_gif}")
-            return str(output_file_gif)
+            print(f"✅ GIF animation saved: {output_file}")
+            return str(output_file)
             
-        except Exception as e2:
-            print(f"❌ Error saving GIF: {e2}")
+        except Exception as e:
+            print(f"❌ Error saving GIF: {e}")
             plt.close(fig)
             return None
+    
+    else:
+        print(f"❌ Unsupported output format: {output_format}")
+        plt.close(fig)
+        return None
 
-def create_combined_animation(data_dir: Path, output_dir: Path, fps: int = 8):
+def create_combined_animation(data_dir: Path, output_dir: Path, fps: int = 8, output_format: str = 'mp4'):
     """Create a combined animation showing multiple episodes"""
     
     print("🎬 Creating combined episode animation...")
@@ -377,23 +444,69 @@ def create_combined_animation(data_dir: Path, output_dir: Path, fps: int = 8):
         interval=1000//fps, blit=True, repeat=True
     )
     
-    # Save combined animation
-    output_file = output_dir / f"combined_episodes_animation.mp4"
-    
-    try:
-        Writer = animation.writers['ffmpeg']
-        writer = Writer(fps=fps, metadata=dict(artist='QuantumTracer'), bitrate=2400)
+    # Save combined animation with format support
+    if output_format.lower() == 'mp4':
+        output_file = output_dir / f"combined_episodes_animation.mp4"
         
-        anim.save(str(output_file), writer=writer)
-        plt.close(fig)
+        mp4_writers = [
+            {
+                'name': 'ffmpeg_libx264',
+                'codec': 'libx264',
+                'extra_args': ['-pix_fmt', 'yuv420p'],
+                'bitrate': 2400
+            },
+            {
+                'name': 'ffmpeg',
+                'codec': None,
+                'extra_args': [],
+                'bitrate': 2400
+            }
+        ]
         
-        print(f"✅ Combined animation saved: {output_file}")
-        return str(output_file)
+        for writer_config in mp4_writers:
+            try:
+                print(f"🎥 Trying {writer_config['name']} for combined animation...")
+                
+                Writer = animation.writers['ffmpeg']
+                writer_kwargs = {
+                    'fps': fps,
+                    'metadata': dict(artist='QuantumTracer'),
+                    'extra_args': writer_config['extra_args']
+                }
+                
+                if writer_config['bitrate']:
+                    writer_kwargs['bitrate'] = writer_config['bitrate']
+                if writer_config['codec']:
+                    writer_kwargs['codec'] = writer_config['codec']
+                
+                writer = Writer(**writer_kwargs)
+                
+                anim.save(str(output_file), writer=writer)
+                plt.close(fig)
+                
+                print(f"✅ Combined MP4 animation saved: {output_file}")
+                return str(output_file)
+                
+            except Exception as e:
+                print(f"❌ {writer_config['name']} failed: {e}")
+                continue
         
-    except Exception as e:
-        print(f"❌ Error saving combined animation: {e}")
-        plt.close(fig)
-        return None
+        # Fallback to GIF for combined animation
+        print("⚠️  MP4 failed for combined animation, trying GIF...")
+        
+    if output_format.lower() == 'gif' or True:  # Always try GIF as fallback
+        output_file_gif = output_dir / f"combined_episodes_animation.gif"
+        try:
+            anim.save(str(output_file_gif), writer='pillow', fps=fps)
+            plt.close(fig)
+            
+            print(f"✅ Combined GIF animation saved: {output_file_gif}")
+            return str(output_file_gif)
+            
+        except Exception as e:
+            print(f"❌ Error saving combined animation: {e}")
+            plt.close(fig)
+            return None
 
 def main():
     parser = argparse.ArgumentParser(description='Create episode animations with live steering/throttle plots')
@@ -407,6 +520,8 @@ def main():
                         help='Frames per second for animation')
     parser.add_argument('--episodes', type=str, nargs='+',
                         help='Specific episodes to animate (default: all)')
+    parser.add_argument('--format', type=str, choices=['mp4', 'gif'], default='mp4',
+                        help='Output format: mp4 or gif (default: mp4)')
     parser.add_argument('--combined', action='store_true',
                         help='Also create combined multi-episode animation')
     
@@ -424,6 +539,7 @@ def main():
     print(f"📁 Data directory: {data_dir}")
     print(f"🎥 Output directory: {output_dir}")
     print(f"⏱️  Frame rate: {args.fps} FPS")
+    print(f"📹 Output format: {args.format.upper()}")
     print("=" * 60)
     
     # Find episodes to process
@@ -444,14 +560,14 @@ def main():
     successful_animations = []
     
     for episode_dir in episode_dirs:
-        result = create_episode_animation(episode_dir, output_dir, args.fps)
+        result = create_episode_animation(episode_dir, output_dir, args.fps, args.format)
         if result:
             successful_animations.append(result)
     
     # Create combined animation if requested
     if args.combined and len(episode_dirs) > 1:
         print("\n" + "=" * 60)
-        combined_result = create_combined_animation(data_dir, output_dir, max(6, args.fps//2))
+        combined_result = create_combined_animation(data_dir, output_dir, max(6, args.fps//2), args.format)
         if combined_result:
             successful_animations.append(combined_result)
     

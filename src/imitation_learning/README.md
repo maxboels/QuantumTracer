@@ -29,7 +29,7 @@ cd /home/maxboels/projects/QuantumTracer/src/imitation_learning
 # Activate lerobot environment
 conda activate lerobot
 
-# Install additional dependencies
+# Install additional dependencies (training monitoring)
 pip install tensorboard
 
 # Verify PyTorch GPU support
