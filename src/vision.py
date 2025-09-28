@@ -20,9 +20,39 @@ class BasicDetector:
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel_size, morph_kernel_size))
         self.min_area_px = min_area_px
 
+    # def analyse_img(self, img_rgb):
+    #     if img_rgb is None:
+    #         return None, None, None
+    #     img_u8 = img_rgb.astype(np.uint8)
+    #     hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
+    #     mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
+    #     mask2 = cv2.inRange(hsv, self.hsv_lower2, self.hsv_upper2)
+    #     mask = cv2.bitwise_or(mask1, mask2)
+    #     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=1)
+
+    #     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    #     if not cnts:
+    #         return None, None, mask
+    #     c = max(cnts, key=cv2.contourArea)
+    #     area = cv2.contourArea(c)
+    #     if area < self.min_area_px:
+    #         return None, None, mask
+    #     (x, y), radius = cv2.minEnclosingCircle(c)
+    #     diameter = 2.0 * float(radius)
+    #     center = (int(round(y)), int(round(x)))  # (row, col)
+    #     diam = int(round(diameter))
+    #     return center, diam, mask
+
     def analyse_img(self, img_rgb):
+        """
+        Returns:
+        center: (x_px, y_px) as floats (None if no detection)
+        diameter: float in pixels (None if no detection)
+        mask: binary mask (numpy array)
+        """
         if img_rgb is None:
             return None, None, None
+
         img_u8 = img_rgb.astype(np.uint8)
         hsv = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV)
         mask1 = cv2.inRange(hsv, self.hsv_lower1, self.hsv_upper1)
@@ -33,16 +63,49 @@ class BasicDetector:
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not cnts:
             return None, None, mask
+
         c = max(cnts, key=cv2.contourArea)
         area = cv2.contourArea(c)
         if area < self.min_area_px:
             return None, None, mask
-        (x, y), radius = cv2.minEnclosingCircle(c)
-        diameter = 2.0 * float(radius)
-        center = (int(round(y)), int(round(x)))  # (row, col)
-        diam = int(round(diameter))
-        return center, diam, mask
 
+        # Ensure contour has enough unique points for fitEllipse
+        try:
+            pts = c.reshape(-1, 2)
+        except Exception:
+            pts = c
+
+        # count unique points (avoid degenerate / collinear sets)
+        try:
+            unique_pts = np.unique(pts, axis=0)
+        except Exception:
+            unique_pts = pts
+
+        if unique_pts.shape[0] >= 5:
+            # try fitEllipse but catch cv2 errors (fallback below)
+            try:
+                ellipse = cv2.fitEllipse(c)            # ((x,y),(w,h),angle)
+                (x, y), (w, h), ang = ellipse
+                diameter = float((w + h) / 2.0)
+                center = (float(x), float(y))
+                return center, diameter, mask
+            except cv2.error:
+                # Fall through to circle fallback
+                pass
+            except Exception:
+                # Defensive: if any other error, fallback too
+                pass
+
+        # Fallback: use enclosing circle
+        try:
+            (x, y), radius = cv2.minEnclosingCircle(c)
+            diameter = float(2.0 * radius)
+            center = (float(x), float(y))
+            return center, diameter, mask
+        except Exception:
+            # If something still fails, return no detection but keep mask
+            return None, None, mask
+    
     def make_debug_view(self, img_rgb, mask, center, diam,
                         label_font=cv2.FONT_HERSHEY_SIMPLEX):
         if img_rgb is None:

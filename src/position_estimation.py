@@ -1,6 +1,34 @@
 # src/vision_control_approach/control.py
 import numpy as np
 import os
+import math
+
+# --- Globals for smoothing and frame timing ---
+_smooth_alpha = 0.6
+_outlier_fraction = 0.5
+
+def compute_distance_uncertainty(S_m, f_px, p_px,
+                                 sigma_S_frac=0.02, sigma_f_frac=0.03, sigma_p_px=0.7):
+    rel_S = sigma_S_frac
+    rel_f = sigma_f_frac
+    rel_p = sigma_p_px / max(1.0, p_px)
+    return math.sqrt(rel_S*rel_S + rel_f*rel_f + rel_p*rel_p)
+
+_prev_distance = None
+_prev_angle = None
+
+def smooth_and_reject(d, a, alpha=_smooth_alpha, outlier_frac=_outlier_fraction):
+    global _prev_distance, _prev_angle
+    if _prev_distance is None:
+        _prev_distance, _prev_angle = d, a
+        return d, a, False
+    if abs(d - _prev_distance) > outlier_frac * max(1e-6, _prev_distance):
+        return _prev_distance, _prev_angle, True
+    d_s = alpha * d + (1.0 - alpha) * _prev_distance
+    a_s = alpha * a + (1.0 - alpha) * _prev_angle
+    _prev_distance, _prev_angle = d_s, a_s
+    return d_s, a_s, False
+
 
 class PositionEstimator:
     """
@@ -116,8 +144,8 @@ class PositionEstimator:
         self.cx_prev = float(cx_s); self.d_prev = float(d_s)
 
         # distance (use smoothed diameter)
-        z = self._diameter_to_distance(d_s)
-        if z is None:
+        distance = self._diameter_to_distance(d_s)
+        if distance is None:
             print(f"[WARN] Could not estimate distance from diameter {d_s:.1f}px")
             return None
 
@@ -126,4 +154,20 @@ class PositionEstimator:
         norm = (cx_s - img_cx) / float(img_cx)
         angle = (0.5 + np.clip(norm * self.steer_scale, -self.steer_scale, self.steer_scale)) * 2 - 1
 
-        return z, angle
+        # # Uncertainty (use estimator.f_px if available)
+        # S_m = 0.125  # balloon diameter in meters (fallback)
+        # f_px = self.f_px
+        # if f_px is None:
+        #     f_px = 4.74 * self.img_size / 6.45
+        # rel_unc = compute_distance_uncertainty(S_m, f_px, diam)
+        # abs_unc = rel_unc * distance
+        # print(f"Detected center={coords}, diam={diam:.2f}px -> dist={distance:.2f}m ±{abs_unc:.2f}m ({rel_unc*100:.1f}%) angle={angle:.2f}°")
+
+        # # Smooth and reject outliers. Use smoothed values for control.
+        # dist_s, ang_s, rejected = smooth_and_reject(distance, angle)
+        # if rejected:
+        #     print("Outlier detected. Skipping actuation.")
+        #     return None
+
+
+        return distance, angle

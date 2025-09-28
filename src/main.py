@@ -8,7 +8,7 @@ from actuator_controls import ActuatorControls
 import time
 
 _last_proc_time = 0.0
-_min_proc_dt = 0.2
+_min_proc_dt = 0.5
 
 
 output_dir = "saved_frames"
@@ -105,7 +105,7 @@ def main():
         print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/")
 
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}))
+    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}, controls={"FrameRate": 2}))
     picam2.post_callback = process_frame_wrapper
 
     # Lock camera controls for stable geometry (daytime indoors/outdoors)
@@ -138,7 +138,7 @@ def main():
             picam2.stop()
         except Exception:
             pass
-        actuator.stop()
+        # actuator.stop()
         if streamer is not None:
             streamer.stop()
 
