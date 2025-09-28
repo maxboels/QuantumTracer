@@ -1,16 +1,16 @@
 from picamera2 import Picamera2
 import os
 from datetime import datetime
-from src.position_estimation import PositionEstimator
+from position_estimation import PositionEstimator
 from vision import BasicDetector, MJPEGStreamer
 from control import BasicController
 from actuator_controls import ActuatorControls
-from time import sleep
-from datetime import datetime
-import numpy as np
+import time
+
+_last_proc_time = 0.0
 
 
-output_dir = "saved_frames"  # Directory to save frames
+output_dir = "saved_frames"
 os.makedirs(output_dir, exist_ok=True)
 
 FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", "1280"))
@@ -18,102 +18,131 @@ FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", "720"))
 TIMEOUT = int(os.getenv("TIMEOUT", "20"))  # seconds
 STREAMING_ENABLED = os.getenv("STREAMING_ENABLED", "false") == "true"
 STREAM_PORT = int(os.getenv("STREAM_PORT", "8081"))  # where you'll view on your laptop
-DEFAULT_ANGLE = -1
-SLEEP_LENGTH = 0.02
-Kp = 0.5
+
+FRAME_RATE = 5
+
+_min_proc_dt = 1.0 / FRAME_RATE if FRAME_RATE > 0 else 0.0
 
 detector = BasicDetector()
 estimator = PositionEstimator(params={"lookup_csv": "px_to_m.csv", "img_size": FRAME_WIDTH})
-ctrl = BasicController(Kp)
+ctrl = BasicController(Kp_dist=0.7, frame_rate=FRAME_RATE)
 actuator = ActuatorControls()
 
-streamer = None
-if STREAMING_ENABLED:
-    streamer = MJPEGStreamer(port=STREAM_PORT)  # visit http://<pi-ip>:8081/
-
+streamer = MJPEGStreamer(port=STREAM_PORT) if STREAMING_ENABLED else None
 start_timestamp = None
 
 def process_frame(request):
+    global _last_proc_time, start_timestamp
+
+    # optional throttle (non-blocking)
+    if _min_proc_dt > 0.0:
+        now = time.perf_counter()
+        if (now - _last_proc_time) < _min_proc_dt:
+            return
+        _last_proc_time = now
+
+    print("Processing frame...")
     frame_rgb = request.make_array("main")  # HxWx3 RGB uint8
 
-    # Detect object location and size
+
+    # Detect object location and size (center (x_px,y_px) floats, diameter float px)
     coords, diameter, mask = detector.analyse_img(frame_rgb)
 
-
-    if STREAMING_ENABLED:
-        # Compose a single debug frame: original | mask | overlay
+    if STREAMING_ENABLED and streamer is not None:
         debug_bgr = detector.make_debug_view(frame_rgb, mask, coords, diameter)
-        streamer.update(debug_bgr)  # publish to MJPEG stream
+        if debug_bgr is not None:
+            streamer.update(debug_bgr)
 
     if coords is None or diameter is None:
-        print("No object detected")
-        # still stream the debug view; don't actuate
-        sleep(SLEEP_LENGTH)
+        print("No object detected.")
         return
-
-    print(f"Detected object at {coords} with diameter {diameter}px")
+    
 
     # Estimate distance and angle to object
     distance_angle = estimator.estimate(coords, diameter)
     if distance_angle is None:
-        # print("Position estimation failed")
-        # sleep(0.02)
-        if np.random.rand() > 1 - SLEEP_LENGTH * 5:
-            DEFAULT_ANGLE *= -1
-        print("Default movement done, since no ballon detected.")
-        throttle, angle = ctrl.default_movement()
-        actuator.set_fwd_speed(throttle)
-        actuator.set_steering_angle(angle)
-        sleep(SLEEP_LENGTH)
-        return
-    distance, angle = distance_angle
-    print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
+        print("Position estimation failed. Falling back to default movement.")
+        throttle_angle = ctrl.default_movement()
 
+    else:
+        distance, angle = distance_angle
+        print(f"Estimated distance: {distance:.2f}m, angle: {angle:.2f} degrees")   
 
-    # Determine steering and throttle from estimated object position
-    throttle_angle = ctrl.get_command(distance, angle)
+        # Determine steering and throttle from estimated object position
+        throttle_angle = ctrl.get_command(distance, angle)
+
     if throttle_angle is None:
         print("Steering control could not be determined. Keeping course unchanged.")
         return
-    
-    throttle, angle = throttle_angle
-    print(f"Throttle: {throttle:.2f}, Angle: {angle:.2f}")
 
-    # Convert the throttle and angle to actuator commands
+    throttle, steer_angle = throttle_angle
+    print(f"Throttle: {throttle:.2f}, Steer: {steer_angle:.2f}")
+
     actuator.set_fwd_speed(throttle)
-    actuator.set_steering_angle(angle)
+    actuator.set_steering_angle(steer_angle)
 
-    # Check for timeout
-    if (datetime.now().timestamp() - start_timestamp) > TIMEOUT:
+    # Timeout check (non-blocking)
+    if start_timestamp and ((datetime.now().timestamp() - start_timestamp) > TIMEOUT):
         actuator.stop()
         return
-    
-    sleep(SLEEP_LENGTH)
+
+def process_frame_wrapper(request):    
+    try:
+        process_frame(request)
+    except Exception as e:
+        try:
+            request.release()
+        except Exception:
+            pass
 
 
 def main():
-    global start_timestamp
-    # UTC timestamp of current time
+    global start_timestamp, streamer
+
     start_timestamp = datetime.now().timestamp()
 
-    # Start streamer
-    streamer.start()
-    print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/ (open from your laptop via the Pi's IP)")
+    if STREAMING_ENABLED and streamer is not None:
+        streamer.start()
+        print(f"[MJPEG] Streaming debug view at http://0.0.0.0:{STREAM_PORT}/")
 
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}))
-    picam2.post_callback = process_frame
+    picam2.configure(picam2.create_video_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}, controls={"FrameRate": FRAME_RATE}))
+    picam2.post_callback = process_frame_wrapper
+
+    # Lock camera controls for stable geometry (daytime indoors/outdoors)
+    try:
+        controls = {
+            "ExposureTime": 16000,    # µs
+            "AnalogueGain": 4,
+            "AwbEnable": True,
+            # "ColourGains": (1.2, 1.0)
+        }
+        picam2.set_controls(controls)
+        print("Camera controls set:", controls)
+    except Exception as e:
+        print("Warning: could not set Picamera2 controls:", e)
+
+    try:
+        picam2.set_controls({"AfMode": 0})
+    except Exception:
+        pass
+
     picam2.start()
 
-    # Keep the script alive
     try:
         while True:
-            sleep(SLEEP_LENGTH)
+            time.sleep(0.1)
     except KeyboardInterrupt:
-        picam2.stop()
+        pass
     finally:
-        actuator.stop()
-        streamer.stop()
+        try:
+            picam2.stop()
+        except Exception:
+            pass
+        # actuator.stop()
+        if streamer is not None:
+            streamer.stop()
+
 
 if __name__ == "__main__":
     main()

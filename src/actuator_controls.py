@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 import os
+import time
 
 SPEED_DAMPING_FACTOR = os.getenv("SPEED_DAMPING_FACTOR", 0.4)
 
@@ -19,10 +20,12 @@ left_right_pwm.start(7)  # Neutral position
 
 fwd_bck_pwm.start(0)  # Stopped
 
+COMMAND_DELAY = 0.5
 
 class ActuatorControls:
     def __init__(self):
-        pass
+        self.last_fwd_command_time = 0.0
+        self.last_steer_command_time = 0.0
 
     def set_fwd_speed(self, speed):
         if speed < 0 or speed > 1:
@@ -31,6 +34,12 @@ class ActuatorControls:
         
         # LOW SPEED OVERRIDE
         # fwd_bck_pwm.ChangeDutyCycle(0 if speed < 0.1 else 10)
+        if time.time() - self.last_fwd_command_time < COMMAND_DELAY:
+            print("Ignoring fwd command, too soon since last command")
+            return
+        
+        print(f"IT HAS BEEN {time.time() - self.last_fwd_command_time} SECONDS SINCE LAST COMMAND")
+        self.last_fwd_command_time = time.time()
         
         fwd_bck_pwm.ChangeDutyCycle(int(speed * 70 * SPEED_DAMPING_FACTOR))
 
@@ -38,7 +47,14 @@ class ActuatorControls:
         if angle < -1 or angle > 1:
             print(f"Angle must be between -1 and 1. Ignoring command {angle}")
             return
-        
+
+        if time.time() - self.last_steer_command_time < COMMAND_DELAY:
+            print("Ignoring steer command, too soon since last command")
+            return
+
+        print(f"IT HAS BEEN {time.time() - self.last_steer_command_time} SECONDS SINCE LAST COMMAND")
+        self.last_steer_command_time = time.time()
+
         duty_cycle = 7.7 + angle * 2  # Map -1 to 1 -> 5% to 9%
         print(f"Setting steering angle to {angle} (duty cycle {duty_cycle}%)")
         left_right_pwm.ChangeDutyCycle(duty_cycle)
